@@ -10,3 +10,4 @@ faiss-cpu
 python-dotenv
 python-pptx
 pandas
+pycryptodome
