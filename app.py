@@ -28,10 +28,12 @@ st.markdown("""
         width: 100%;
     }
     
-    /* Style for the small upload button */
-    .upload-button {
-        display: inline-block;
-        margin-bottom: 1rem;
+    /* Style for attach button to look integrated */
+    .attach-btn button {
+        background-color: transparent;
+        border: none;
+        padding: 0.5rem;
+        font-size: 1.5rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -230,10 +232,6 @@ if 'current_chat_id' not in st.session_state:
     else:
         create_new_chat()
 
-# Initialize file upload trigger
-if 'show_uploader' not in st.session_state:
-    st.session_state.show_uploader = False
-
 # Header
 st.title("🤖 AI Document Q&A Assistant")
 st.markdown("Upload your documents and ask questions!")
@@ -294,48 +292,43 @@ st.header(f"💬 {current_chat['title']}")
 if current_chat['processed_files']:
     st.caption(f"📚 {len(current_chat['processed_files'])} document(s) loaded | {len(current_chat['chunks'])} chunks")
 
-# Small "+" button to trigger file upload (like Claude/ChatGPT)
-col1, col2 = st.columns([0.5, 9.5])
-
-with col1:
-    if st.button("➕", help="Attach files", key="attach_button"):
-        st.session_state.show_uploader = not st.session_state.show_uploader
-        st.rerun()
-
-# Show file uploader only when "+" is clicked
-if st.session_state.show_uploader:
-    uploaded_files = st.file_uploader(
-        "Choose files",
-        type=['pdf', 'docx', 'doc', 'txt', 'pptx', 'ppt'],
-        accept_multiple_files=True,
-        key=f"uploader_{st.session_state.current_chat_id}",
-        label_visibility="collapsed"
-    )
-    
-    # Auto-process when files are uploaded
-    if uploaded_files:
-        new_files = [f for f in uploaded_files if f.name not in current_chat['processed_files']]
-        
-        if new_files:
-            with st.spinner(f"Processing {len(new_files)} file(s)..."):
-                num_files, num_chunks, total_chars = process_uploaded_files(new_files, st.session_state.current_chat_id)
-                
-                if num_files > 0:
-                    st.success(f"✅ Processed {num_files} file(s): {num_chunks} chunks, {total_chars:,} characters")
-                    st.session_state.show_uploader = False  # Hide after upload
-                    st.rerun()
-                else:
-                    st.error("Could not extract text from the uploaded files")
-
-st.markdown("---")
-
 # Display chat history
 for message in current_chat['messages']:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Chat input - works with or without documents
-if prompt := st.chat_input("Ask me anything..."):
+# Chat input area with attach button on the left (like Claude/ChatGPT)
+col1, col2 = st.columns([0.7, 9.3])
+
+with col1:
+    # File uploader styled as a button
+    uploaded_files = st.file_uploader(
+        "📎",
+        type=['pdf', 'docx', 'doc', 'txt', 'pptx', 'ppt'],
+        accept_multiple_files=True,
+        key=f"uploader_{st.session_state.current_chat_id}",
+        label_visibility="collapsed"
+    )
+
+with col2:
+    # Chat input
+    prompt = st.chat_input("Ask me anything...")
+
+# Auto-process when files are uploaded
+if uploaded_files:
+    new_files = [f for f in uploaded_files if f.name not in current_chat['processed_files']]
+    
+    if new_files:
+        with st.spinner(f"Processing {len(new_files)} file(s)..."):
+            num_files, num_chunks, total_chars = process_uploaded_files(new_files, st.session_state.current_chat_id)
+            
+            if num_files > 0:
+                st.success(f"✅ Processed {num_files} file(s): {num_chunks} chunks, {total_chars:,} characters")
+            else:
+                st.error("Could not extract text from the uploaded files")
+
+# Handle chat input
+if prompt:
     # Update chat title if this is the first message
     if len(current_chat['messages']) == 0:
         current_chat['title'] = generate_chat_title(prompt)
