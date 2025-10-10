@@ -83,7 +83,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def smart_chunk_text(text, min_chunk_size=1000, max_chunk_size=1800):
+def smart_chunk_text(text, min_chunk_size=2500, max_chunk_size=3000):
     """
     Smart chunking with improved precision for better reference detection
     
@@ -150,7 +150,7 @@ def smart_chunk_text(text, min_chunk_size=1000, max_chunk_size=1800):
                 current_chunk = para
     
     # Add final chunk (lowered minimum to 50 chars for better coverage)
-    if current_chunk and len(current_chunk.strip()) > 50:
+    if current_chunk and len(current_chunk.strip()) > 150:
         chunks.append(current_chunk.strip())
     
     return chunks
@@ -423,7 +423,7 @@ if prompt:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
                     # Search for relevant chunks in current chat (INCREASED TO 15)
-                    results = current_chat['embedding_manager'].search(prompt, top_k=15)
+                    results = current_chat['embedding_manager'].search(prompt, top_k=10)
                     chunks = [c for c, _ in results]
                     
                     # Get answer from Claude with document context
