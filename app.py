@@ -83,9 +83,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def smart_chunk_text(text, min_chunk_size=1500, max_chunk_size=2500):
-    """Smart chunking that preserves paragraph structure"""
+def smart_chunk_text(text, min_chunk_size=1000, max_chunk_size=1800):
+    """
+    Smart chunking with improved precision for better reference detection
+    
+    Args:
+        min_chunk_size: Minimum characters per chunk (default: 1000)
+        max_chunk_size: Maximum characters per chunk (default: 1800)
+    """
+    # Split by double newlines (paragraphs)
     paragraphs = re.split(r'\n\s*\n', text)
+    
     chunks = []
     current_chunk = ""
     
@@ -94,41 +102,55 @@ def smart_chunk_text(text, min_chunk_size=1500, max_chunk_size=2500):
         if not para:
             continue
         
-        potential_size = len(current_chunk) + len(para) + 2
+        # Check if adding this paragraph would exceed max size
+        potential_size = len(current_chunk) + len(para) + 2  # +2 for \n\n
         
         if potential_size <= max_chunk_size:
+            # Add paragraph to current chunk
             if current_chunk:
                 current_chunk += "\n\n" + para
             else:
                 current_chunk = para
         else:
+            # Current chunk is ready, save it if it meets minimum
             if current_chunk and len(current_chunk) >= min_chunk_size:
                 chunks.append(current_chunk)
                 current_chunk = para
             elif current_chunk:
+                # Chunk is too small, but we need to start new one anyway
+                # Try to split the large paragraph if needed
                 if len(para) > max_chunk_size:
+                    # Paragraph itself is too large - split by sentences
                     if current_chunk:
                         chunks.append(current_chunk)
+                    
+                    # Split large paragraph into sentences
                     sentences = re.split(r'([.!?]+\s+)', para)
                     temp_chunk = ""
+                    
                     for i in range(0, len(sentences), 2):
                         sentence = sentences[i]
                         if i + 1 < len(sentences):
-                            sentence += sentences[i + 1]
+                            sentence += sentences[i + 1]  # Add punctuation back
+                        
                         if len(temp_chunk) + len(sentence) <= max_chunk_size:
                             temp_chunk += sentence
                         else:
                             if temp_chunk:
                                 chunks.append(temp_chunk.strip())
                             temp_chunk = sentence
+                    
                     current_chunk = temp_chunk
                 else:
+                    # Add small chunk and start fresh with new paragraph
                     chunks.append(current_chunk)
                     current_chunk = para
             else:
+                # No current chunk, start with this paragraph
                 current_chunk = para
     
-    if current_chunk and len(current_chunk.strip()) > 100:
+    # Add final chunk (lowered minimum to 50 chars for better coverage)
+    if current_chunk and len(current_chunk.strip()) > 50:
         chunks.append(current_chunk.strip())
     
     return chunks
@@ -400,8 +422,8 @@ if prompt:
             try:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
-                    # Search for relevant chunks in current chat
-                    results = current_chat['embedding_manager'].search(prompt, top_k=12)
+                    # Search for relevant chunks in current chat (INCREASED TO 15)
+                    results = current_chat['embedding_manager'].search(prompt, top_k=15)
                     chunks = [c for c, _ in results]
                     
                     # Get answer from Claude with document context
