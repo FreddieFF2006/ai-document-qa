@@ -438,8 +438,13 @@ if prompt:
                     with st.expander(f"📊 Initial Search: {len(chunks)} chunks, ~{approx_tokens:,} tokens"):
                         st.caption(f"Stage 1: Searching top {len(chunks)} most relevant chunks")
                     
-                    # Get initial answer from Claude
-                    answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
+                    # Get initial answer from Claude WITH CONVERSATION MEMORY
+                    answer = st.session_state.claude_agent.ask(
+                        prompt, 
+                        chunks, 
+                        max_tokens=3000,
+                        conversation_history=current_chat['messages']
+                    )
                     
                     # STAGE 2: Check if answer is uncertain or incomplete
                     # Look for uncertainty indicators in the response
@@ -486,11 +491,12 @@ if prompt:
                             
                             st.write(f"Extended search: {len(all_chunks)} total chunks, ~{approx_tokens_extended:,} tokens")
                             
-                            # Ask Claude again with expanded context
+                            # Ask Claude again with expanded context AND CONVERSATION MEMORY
                             expanded_answer = st.session_state.claude_agent.ask(
                                 f"{prompt}\n\nNote: This is an expanded search after initial results were insufficient. Please provide a comprehensive answer if the information is now available.",
                                 all_chunks,
-                                max_tokens=3000
+                                max_tokens=3000,
+                                conversation_history=current_chat['messages']
                             )
                             
                             status.update(label="✅ Extended search complete", state="complete")
