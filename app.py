@@ -83,7 +83,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def smart_chunk_text(text, min_chunk_size=2500, max_chunk_size=3000):
+def smart_chunk_text(text, min_chunk_size=1000, max_chunk_size=1800):
     """
     Smart chunking with improved precision for better reference detection
     
@@ -150,7 +150,7 @@ def smart_chunk_text(text, min_chunk_size=2500, max_chunk_size=3000):
                 current_chunk = para
     
     # Add final chunk (lowered minimum to 50 chars for better coverage)
-    if current_chunk and len(current_chunk.strip()) > 150:
+    if current_chunk and len(current_chunk.strip()) > 50:
         chunks.append(current_chunk.strip())
     
     return chunks
@@ -422,11 +422,28 @@ if prompt:
             try:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
-                    # Search for relevant chunks in current chat (INCREASED TO 15)
-                    results = current_chat['embedding_manager'].search(prompt, top_k=10)
-                    chunks = [c for c, _ in results]
+                    # OPTIMIZED: Retrieve fewer chunks (8 instead of 15) for token efficiency
+                    results = current_chat['embedding_manager'].search(prompt, top_k=8)
                     
-                    # Get answer from Claude with document context
+                    # OPTIMIZED: Limit each chunk to first 1200 characters to reduce token usage
+                    chunks = []
+                    for chunk, score in results:
+                        # Take only first 1200 chars of each chunk for context efficiency
+                        truncated_chunk = chunk[:1200]
+                        if len(chunk) > 1200:
+                            truncated_chunk += "...[truncated]"
+                        chunks.append(truncated_chunk)
+                    
+                    # Calculate approximate tokens being sent
+                    total_chars = sum(len(c) for c in chunks)
+                    approx_tokens = total_chars // 4  # Rough estimate: 4 chars ≈ 1 token
+                    
+                    # Show token usage to user
+                    with st.expander(f"📊 Context: {len(chunks)} chunks, ~{approx_tokens:,} tokens"):
+                        st.caption(f"Using {len(chunks)} document chunks (limited to 1200 chars each)")
+                        st.caption(f"Total context size: {total_chars:,} characters ≈ {approx_tokens:,} tokens")
+                    
+                    # Get answer from Claude with optimized context
                     answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
                 else:
                     # No documents - just chat with Claude directly
