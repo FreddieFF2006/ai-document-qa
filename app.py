@@ -422,16 +422,16 @@ if prompt:
             try:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
-                    # OPTIMIZED: Retrieve fewer chunks (8 instead of 15) for token efficiency
-                    results = current_chat['embedding_manager'].search(prompt, top_k=8)
+                    # BALANCED: Retrieve 12 chunks for better coverage
+                    results = current_chat['embedding_manager'].search(prompt, top_k=12)
                     
-                    # OPTIMIZED: Limit each chunk to first 1200 characters to reduce token usage
+                    # BALANCED: Limit each chunk to 1000 characters (good context without bloat)
                     chunks = []
                     for chunk, score in results:
-                        # Take only first 1200 chars of each chunk for context efficiency
-                        truncated_chunk = chunk[:1200]
-                        if len(chunk) > 1200:
-                            truncated_chunk += "...[truncated]"
+                        # Take first 1000 chars of each chunk - balanced approach
+                        truncated_chunk = chunk[:1000]
+                        if len(chunk) > 1000:
+                            truncated_chunk += "...[truncated for efficiency]"
                         chunks.append(truncated_chunk)
                     
                     # Calculate approximate tokens being sent
@@ -440,10 +440,11 @@ if prompt:
                     
                     # Show token usage to user
                     with st.expander(f"📊 Context: {len(chunks)} chunks, ~{approx_tokens:,} tokens"):
-                        st.caption(f"Using {len(chunks)} document chunks (limited to 1200 chars each)")
-                        st.caption(f"Total context size: {total_chars:,} characters ≈ {approx_tokens:,} tokens")
+                        st.caption(f"Using {len(chunks)} relevant document chunks")
+                        st.caption(f"Context size: {total_chars:,} characters ≈ {approx_tokens:,} tokens")
+                        st.caption("✨ Optimized for accuracy and cost efficiency")
                     
-                    # Get answer from Claude with optimized context
+                    # Get answer from Claude with balanced context
                     answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
                 else:
                     # No documents - just chat with Claude directly
