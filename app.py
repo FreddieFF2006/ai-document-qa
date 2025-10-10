@@ -275,8 +275,3 @@ with st.sidebar:
         if st.button("💬 Clear Chat History"):
             st.session_state.chat_history = []
             st.rerun()
-
-# Footer
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🔒 Security")
-st.sidebar.info("Your API key is loaded from .env file and never exposed.")
