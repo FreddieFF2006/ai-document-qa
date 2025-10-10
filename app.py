@@ -83,74 +83,78 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def smart_chunk_text(text, min_chunk_size=1000, max_chunk_size=1800):
+def smart_chunk_text(text, chunk_size=1200, overlap=200):
     """
-    Smart chunking with improved precision for better reference detection
+    Advanced chunking with sentence preservation, paragraph structure, and overlap
     
     Args:
-        min_chunk_size: Minimum characters per chunk (default: 1000)
-        max_chunk_size: Maximum characters per chunk (default: 1800)
+        chunk_size: Target size for each chunk in characters (default: 1200)
+        overlap: Number of characters to overlap between chunks for context continuity (default: 200)
+    
+    Features:
+    - Preserves complete sentences (never cuts mid-sentence)
+    - Maintains paragraph structure
+    - Creates overlap between chunks for context
+    - Ensures semantic continuity
     """
-    # Split by double newlines (paragraphs)
+    
+    # Split into paragraphs first (preserve structure)
     paragraphs = re.split(r'\n\s*\n', text)
     
     chunks = []
     current_chunk = ""
+    previous_sentences = []  # For overlap
     
     for para in paragraphs:
         para = para.strip()
         if not para:
             continue
         
-        # Check if adding this paragraph would exceed max size
-        potential_size = len(current_chunk) + len(para) + 2  # +2 for \n\n
+        # Split paragraph into sentences (preserve complete sentences)
+        # This regex handles periods, exclamation marks, and question marks
+        sentences = re.split(r'(?<=[.!?])\s+', para)
         
-        if potential_size <= max_chunk_size:
-            # Add paragraph to current chunk
-            if current_chunk:
-                current_chunk += "\n\n" + para
-            else:
-                current_chunk = para
-        else:
-            # Current chunk is ready, save it if it meets minimum
-            if current_chunk and len(current_chunk) >= min_chunk_size:
-                chunks.append(current_chunk)
-                current_chunk = para
-            elif current_chunk:
-                # Chunk is too small, but we need to start new one anyway
-                # Try to split the large paragraph if needed
-                if len(para) > max_chunk_size:
-                    # Paragraph itself is too large - split by sentences
-                    if current_chunk:
-                        chunks.append(current_chunk)
-                    
-                    # Split large paragraph into sentences
-                    sentences = re.split(r'([.!?]+\s+)', para)
-                    temp_chunk = ""
-                    
-                    for i in range(0, len(sentences), 2):
-                        sentence = sentences[i]
-                        if i + 1 < len(sentences):
-                            sentence += sentences[i + 1]  # Add punctuation back
-                        
-                        if len(temp_chunk) + len(sentence) <= max_chunk_size:
-                            temp_chunk += sentence
-                        else:
-                            if temp_chunk:
-                                chunks.append(temp_chunk.strip())
-                            temp_chunk = sentence
-                    
-                    current_chunk = temp_chunk
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            
+            # Check if adding this sentence would exceed chunk size
+            potential_chunk = current_chunk + ("\n\n" if current_chunk and not current_chunk.endswith("\n\n") else "") + sentence + " "
+            
+            if len(potential_chunk) <= chunk_size:
+                # Add sentence to current chunk
+                if current_chunk:
+                    # Check if we're in same paragraph or new one
+                    if sentences.index(sentence) == 0 and current_chunk:
+                        current_chunk += "\n\n" + sentence + " "
+                    else:
+                        current_chunk += sentence + " "
                 else:
-                    # Add small chunk and start fresh with new paragraph
-                    chunks.append(current_chunk)
-                    current_chunk = para
+                    current_chunk = sentence + " "
+                
+                # Track recent sentences for overlap
+                previous_sentences.append(sentence)
+                if len(' '.join(previous_sentences)) > overlap:
+                    previous_sentences.pop(0)
             else:
-                # No current chunk, start with this paragraph
-                current_chunk = para
+                # Current chunk is full, save it
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                
+                # Start new chunk with overlap from previous chunk
+                overlap_text = ' '.join(previous_sentences[-3:]) if len(previous_sentences) >= 3 else ' '.join(previous_sentences)
+                
+                if overlap_text and len(overlap_text) > 50:  # Only add overlap if substantial
+                    current_chunk = "[...continued] " + overlap_text + " " + sentence + " "
+                else:
+                    current_chunk = sentence + " "
+                
+                # Reset overlap tracking
+                previous_sentences = [sentence]
     
-    # Add final chunk (lowered minimum to 50 chars for better coverage)
-    if current_chunk and len(current_chunk.strip()) > 50:
+    # Add final chunk
+    if current_chunk and len(current_chunk.strip()) > 100:
         chunks.append(current_chunk.strip())
     
     return chunks
@@ -233,7 +237,7 @@ def process_uploaded_files(uploaded_files, chat_id):
             
             if text and len(text.strip()) > 0:
                 total_chars += len(text)
-                chunks = smart_chunk_text(text)
+                chunks = smart_chunk_text(text, chunk_size=1200, overlap=200)
                 chunks_with_source = [f"[Source: {uploaded_file.name}]\n\n{chunk}" for chunk in chunks]
                 all_chunks.extend(chunks_with_source)
                 processed_files.append(uploaded_file.name)
@@ -422,17 +426,11 @@ if prompt:
             try:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
-                    # BALANCED: Retrieve 12 chunks for better coverage
+                    # Retrieve 12 chunks with full context (no truncation since chunks are already optimized)
                     results = current_chat['embedding_manager'].search(prompt, top_k=12)
                     
-                    # BALANCED: Limit each chunk to 1000 characters (good context without bloat)
-                    chunks = []
-                    for chunk, score in results:
-                        # Take first 1000 chars of each chunk - balanced approach
-                        truncated_chunk = chunk[:1000]
-                        if len(chunk) > 1000:
-                            truncated_chunk += "...[truncated for efficiency]"
-                        chunks.append(truncated_chunk)
+                    # Use full chunks since they're already properly sized with overlap
+                    chunks = [chunk for chunk, score in results]
                     
                     # Calculate approximate tokens being sent
                     total_chars = sum(len(c) for c in chunks)
@@ -440,11 +438,11 @@ if prompt:
                     
                     # Show token usage to user
                     with st.expander(f"📊 Context: {len(chunks)} chunks, ~{approx_tokens:,} tokens"):
-                        st.caption(f"Using {len(chunks)} relevant document chunks")
+                        st.caption(f"Using {len(chunks)} contextual chunks with sentence preservation")
                         st.caption(f"Context size: {total_chars:,} characters ≈ {approx_tokens:,} tokens")
-                        st.caption("✨ Optimized for accuracy and cost efficiency")
+                        st.caption("✨ Smart chunking with overlap for better context continuity")
                     
-                    # Get answer from Claude with balanced context
+                    # Get answer from Claude with optimized contextual chunks
                     answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
                 else:
                     # No documents - just chat with Claude directly
