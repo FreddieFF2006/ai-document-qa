@@ -111,6 +111,50 @@ def extract_text_from_txt(file):
     """Extract text from text file"""
     return file.read().decode('utf-8')
 
+def process_uploaded_files(uploaded_files):
+    """Process uploaded files and return chunks"""
+    if not st.session_state.embedding_manager:
+        st.session_state.embedding_manager = EmbeddingManager()
+    
+    all_chunks = []
+    processed_files = []
+    total_chars = 0
+    
+    for uploaded_file in uploaded_files:
+        file_ext = uploaded_file.name.split('.')[-1].lower()
+        
+        try:
+            if file_ext == 'pdf':
+                text = extract_text_from_pdf(uploaded_file)
+            elif file_ext in ['docx', 'doc']:
+                text = extract_text_from_docx(uploaded_file)
+            elif file_ext in ['pptx', 'ppt']:
+                text = extract_text_from_pptx(uploaded_file)
+            elif file_ext == 'txt':
+                text = extract_text_from_txt(uploaded_file)
+            else:
+                continue
+            
+            if text and len(text.strip()) > 0:
+                total_chars += len(text)
+                chunks = smart_chunk_text(text)
+                chunks_with_source = [f"[Source: {uploaded_file.name}]\n\n{chunk}" for chunk in chunks]
+                all_chunks.extend(chunks_with_source)
+                processed_files.append(uploaded_file.name)
+        
+        except Exception as e:
+            st.warning(f"⚠️ Could not process {uploaded_file.name}: {str(e)}")
+    
+    if all_chunks:
+        # Add to existing chunks or create new index
+        st.session_state.chunks.extend(all_chunks)
+        st.session_state.embedding_manager.build_index(st.session_state.chunks)
+        st.session_state.processed_files.extend(processed_files)
+        
+        return len(processed_files), len(all_chunks), total_chars
+    
+    return 0, 0, 0
+
 # Check for API key
 api_key = os.getenv('ANTHROPIC_API_KEY')
 
@@ -139,84 +183,11 @@ if 'chat_history' not in st.session_state:
 st.title("🤖 AI Document Q&A Assistant")
 st.markdown("Upload your documents and ask questions!")
 
-# Sidebar for file upload
+# Sidebar - Show loaded documents only
 with st.sidebar:
-    st.header("📁 Upload Documents")
+    st.header("📚 Loaded Documents")
     
-    uploaded_files = st.file_uploader(
-        "Choose files",
-        type=['pdf', 'docx', 'doc', 'txt', 'pptx', 'ppt'],
-        accept_multiple_files=True,
-        help="Upload PDF, Word, PowerPoint, or text files"
-    )
-    
-    if st.button("🚀 Process Documents", type="primary"):
-        if not uploaded_files:
-            st.error("Please upload at least one document!")
-        else:
-            with st.spinner("Processing documents..."):
-                try:
-                    # Initialize embedding manager if not already done
-                    if not st.session_state.embedding_manager:
-                        st.session_state.embedding_manager = EmbeddingManager()
-                    
-                    all_chunks = []
-                    processed_files = []
-                    total_chars = 0
-                    
-                    progress_bar = st.progress(0)
-                    
-                    for idx, uploaded_file in enumerate(uploaded_files):
-                        progress_bar.progress((idx + 1) / len(uploaded_files))
-                        
-                        file_ext = uploaded_file.name.split('.')[-1].lower()
-                        
-                        # Extract text based on file type
-                        try:
-                            if file_ext == 'pdf':
-                                text = extract_text_from_pdf(uploaded_file)
-                            elif file_ext in ['docx', 'doc']:
-                                text = extract_text_from_docx(uploaded_file)
-                            elif file_ext in ['pptx', 'ppt']:
-                                text = extract_text_from_pptx(uploaded_file)
-                            elif file_ext == 'txt':
-                                text = extract_text_from_txt(uploaded_file)
-                            else:
-                                continue
-                            
-                            if text and len(text.strip()) > 0:
-                                total_chars += len(text)
-                                
-                                # Chunk text
-                                chunks = smart_chunk_text(text)
-                                chunks_with_source = [f"[Source: {uploaded_file.name}]\n\n{chunk}" for chunk in chunks]
-                                all_chunks.extend(chunks_with_source)
-                                processed_files.append(uploaded_file.name)
-                            
-                        except Exception as e:
-                            st.warning(f"⚠️ Could not process {uploaded_file.name}: {str(e)}")
-                    
-                    progress_bar.empty()
-                    
-                    if all_chunks:
-                        # Build index
-                        st.session_state.embedding_manager.build_index(all_chunks)
-                        st.session_state.chunks = all_chunks
-                        st.session_state.processed_files = processed_files
-                        
-                        st.success(f"✅ Processed {len(processed_files)} documents!")
-                        st.info(f"📊 {len(all_chunks)} chunks | {total_chars:,} characters")
-                    else:
-                        st.error("No text could be extracted from the uploaded files.")
-                    
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-                    import traceback
-                    st.code(traceback.format_exc())
-    
-    # Show processed files
     if st.session_state.processed_files:
-        st.header("📚 Loaded Documents")
         for i, file in enumerate(st.session_state.processed_files, 1):
             st.text(f"{i}. {file}")
         st.info(f"Total chunks: {len(st.session_state.chunks)}")
@@ -228,50 +199,75 @@ with st.sidebar:
             st.session_state.processed_files = []
             st.session_state.chat_history = []
             st.rerun()
-
-# Main chat interface
-st.header("💬 Ask Questions")
-
-if not st.session_state.processed_files:
-    st.info("👈 Upload documents in the sidebar to get started!")
-else:
-    # Display chat history
-    for message in st.session_state.chat_history:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    else:
+        st.info("No documents loaded yet")
     
-    # Chat input
-    if prompt := st.chat_input("Ask a question about your documents..."):
-        if not st.session_state.embedding_manager:
-            st.error("Please upload and process documents first!")
-        else:
-            # Add user message to chat
-            st.session_state.chat_history.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            # Generate response
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        # Search for relevant chunks
-                        results = st.session_state.embedding_manager.search(prompt, top_k=12)
-                        chunks = [c for c, _ in results]
-                        
-                        # Get answer from Claude
-                        answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
-                        
-                        st.markdown(answer)
-                        st.session_state.chat_history.append({"role": "assistant", "content": answer})
-                        
-                    except Exception as e:
-                        error_msg = f"Error: {str(e)}"
-                        st.error(error_msg)
-                        st.session_state.chat_history.append({"role": "assistant", "content": error_msg})
-
-# Clear chat button in sidebar
-with st.sidebar:
+    # Clear chat button
     if st.session_state.chat_history:
+        st.markdown("---")
         if st.button("💬 Clear Chat History"):
             st.session_state.chat_history = []
             st.rerun()
+
+# Main chat interface
+st.header("💬 Chat")
+
+# File uploader above chat
+uploaded_files = st.file_uploader(
+    "📎 Upload documents to add to knowledge base",
+    type=['pdf', 'docx', 'doc', 'txt', 'pptx', 'ppt'],
+    accept_multiple_files=True,
+    help="Upload PDF, Word, PowerPoint, or text files - they will be processed automatically",
+    key="main_uploader"
+)
+
+# Auto-process when files are uploaded
+if uploaded_files:
+    # Check if these are new files (not already processed)
+    new_files = [f for f in uploaded_files if f.name not in st.session_state.processed_files]
+    
+    if new_files:
+        with st.spinner(f"Processing {len(new_files)} file(s)..."):
+            num_files, num_chunks, total_chars = process_uploaded_files(new_files)
+            
+            if num_files > 0:
+                st.success(f"✅ Processed {num_files} file(s): {num_chunks} chunks, {total_chars:,} characters")
+            else:
+                st.error("Could not extract text from the uploaded files")
+
+# Display chat history
+for message in st.session_state.chat_history:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Chat input
+if not st.session_state.processed_files:
+    st.info("👆 Upload documents above to get started!")
+
+if prompt := st.chat_input("Ask a question about your documents..."):
+    if not st.session_state.embedding_manager:
+        st.error("Please upload documents first!")
+    else:
+        # Add user message to chat
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        # Generate response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    # Search for relevant chunks
+                    results = st.session_state.embedding_manager.search(prompt, top_k=12)
+                    chunks = [c for c, _ in results]
+                    
+                    # Get answer from Claude
+                    answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
+                    
+                    st.markdown(answer)
+                    st.session_state.chat_history.append({"role": "assistant", "content": answer})
+                    
+                except Exception as e:
+                    error_msg = f"Error: {str(e)}"
+                    st.error(error_msg)
+                    st.session_state.chat_history.append({"role": "assistant", "content": error_msg})
