@@ -21,11 +21,31 @@ st.markdown("""
         display: flex;
         align-items: center;
         justify-content: center;
+        padding: 0.25rem 0.75rem;
     }
     
     /* Make chat buttons take full width */
     div[data-testid="column"] button {
         width: 100%;
+    }
+    
+    /* Force trash can button to be perfectly centered */
+    div[data-testid="column"]:last-child button {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 0.25rem !important;
+        min-width: 40px !important;
+    }
+    
+    /* Ensure emoji stays centered */
+    div[data-testid="column"]:last-child button p {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: 1;
     }
     
     /* HIDE THE ENTIRE FILE UPLOADER UI */
@@ -52,6 +72,13 @@ st.markdown("""
     .attach-button:hover {
         background-color: #e0e0e0;
         border-color: #d0d0d0;
+    }
+    
+    /* Fix sidebar button alignment */
+    .stSidebar button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -293,10 +320,11 @@ with st.sidebar:
                 st.rerun()
         
         with col2:
-            # Delete button
+            # Delete button - centered
             if st.button("🗑️", key=f"delete_{chat_id}", use_container_width=True):
                 if len(st.session_state.chats) > 1:
                     del st.session_state.chats[chat_id]
+                    # Switch to another chat
                     if st.session_state.current_chat_id == chat_id:
                         st.session_state.current_chat_id = list(st.session_state.chats.keys())[0]
                     st.rerun()
@@ -309,7 +337,7 @@ current_chat = st.session_state.chats[st.session_state.current_chat_id]
 # Main chat interface
 st.header(f"💬 {current_chat['title']}")
 
-# Show document count
+# Show document count for current chat
 if current_chat['processed_files']:
     st.caption(f"📚 {len(current_chat['processed_files'])} document(s) loaded | {len(current_chat['chunks'])} chunks")
 
@@ -357,21 +385,29 @@ if st.session_state.show_file_uploader:
 
 # Handle chat input
 if prompt:
+    # Update chat title if this is the first message
     if len(current_chat['messages']) == 0:
         current_chat['title'] = generate_chat_title(prompt)
     
+    # Add user message to chat
     current_chat['messages'].append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
     
+    # Generate response
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
+                # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
+                    # Search for relevant chunks in current chat
                     results = current_chat['embedding_manager'].search(prompt, top_k=12)
                     chunks = [c for c, _ in results]
+                    
+                    # Get answer from Claude with document context
                     answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
                 else:
+                    # No documents - just chat with Claude directly
                     message = st.session_state.claude_agent.client.messages.create(
                         model="claude-sonnet-4-20250514",
                         max_tokens=3000,
