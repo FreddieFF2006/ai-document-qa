@@ -13,7 +13,7 @@ load_dotenv()
 
 st.set_page_config(page_title="AI Document Q&A", page_icon="🤖", layout="wide")
 
-# Add custom CSS for better button alignment
+# Add custom CSS for better styling
 st.markdown("""
 <style>
     /* Center the icons in buttons */
@@ -26,6 +26,12 @@ st.markdown("""
     /* Make chat buttons take full width */
     div[data-testid="column"] button {
         width: 100%;
+    }
+    
+    /* Style for the small upload button */
+    .upload-button {
+        display: inline-block;
+        margin-bottom: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -224,6 +230,10 @@ if 'current_chat_id' not in st.session_state:
     else:
         create_new_chat()
 
+# Initialize file upload trigger
+if 'show_uploader' not in st.session_state:
+    st.session_state.show_uploader = False
+
 # Header
 st.title("🤖 AI Document Q&A Assistant")
 st.markdown("Upload your documents and ask questions!")
@@ -284,27 +294,40 @@ st.header(f"💬 {current_chat['title']}")
 if current_chat['processed_files']:
     st.caption(f"📚 {len(current_chat['processed_files'])} document(s) loaded | {len(current_chat['chunks'])} chunks")
 
-# File uploader above chat
-uploaded_files = st.file_uploader(
-    "📎 Upload documents to add to this chat (optional)",
-    type=['pdf', 'docx', 'doc', 'txt', 'pptx', 'ppt'],
-    accept_multiple_files=True,
-    help="Upload PDF, Word, PowerPoint, or text files - or just chat without documents!",
-    key=f"uploader_{st.session_state.current_chat_id}"
-)
+# Small "+" button to trigger file upload (like Claude/ChatGPT)
+col1, col2 = st.columns([0.5, 9.5])
 
-# Auto-process when files are uploaded
-if uploaded_files:
-    new_files = [f for f in uploaded_files if f.name not in current_chat['processed_files']]
+with col1:
+    if st.button("➕", help="Attach files", key="attach_button"):
+        st.session_state.show_uploader = not st.session_state.show_uploader
+        st.rerun()
+
+# Show file uploader only when "+" is clicked
+if st.session_state.show_uploader:
+    uploaded_files = st.file_uploader(
+        "Choose files",
+        type=['pdf', 'docx', 'doc', 'txt', 'pptx', 'ppt'],
+        accept_multiple_files=True,
+        key=f"uploader_{st.session_state.current_chat_id}",
+        label_visibility="collapsed"
+    )
     
-    if new_files:
-        with st.spinner(f"Processing {len(new_files)} file(s)..."):
-            num_files, num_chunks, total_chars = process_uploaded_files(new_files, st.session_state.current_chat_id)
-            
-            if num_files > 0:
-                st.success(f"✅ Processed {num_files} file(s): {num_chunks} chunks, {total_chars:,} characters")
-            else:
-                st.error("Could not extract text from the uploaded files")
+    # Auto-process when files are uploaded
+    if uploaded_files:
+        new_files = [f for f in uploaded_files if f.name not in current_chat['processed_files']]
+        
+        if new_files:
+            with st.spinner(f"Processing {len(new_files)} file(s)..."):
+                num_files, num_chunks, total_chars = process_uploaded_files(new_files, st.session_state.current_chat_id)
+                
+                if num_files > 0:
+                    st.success(f"✅ Processed {num_files} file(s): {num_chunks} chunks, {total_chars:,} characters")
+                    st.session_state.show_uploader = False  # Hide after upload
+                    st.rerun()
+                else:
+                    st.error("Could not extract text from the uploaded files")
+
+st.markdown("---")
 
 # Display chat history
 for message in current_chat['messages']:
@@ -336,7 +359,6 @@ if prompt := st.chat_input("Ask me anything..."):
                     answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
                 else:
                     # No documents - just chat with Claude directly
-                    # Create a simple message without document context
                     message = st.session_state.claude_agent.client.messages.create(
                         model="claude-sonnet-4-20250514",
                         max_tokens=3000,
