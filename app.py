@@ -426,24 +426,88 @@ if prompt:
             try:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
-                    # Retrieve 12 chunks with full context (no truncation since chunks are already optimized)
+                    # STAGE 1: Initial retrieval - get top 12 chunks
                     results = current_chat['embedding_manager'].search(prompt, top_k=12)
-                    
-                    # Use full chunks since they're already properly sized with overlap
                     chunks = [chunk for chunk, score in results]
                     
-                    # Calculate approximate tokens being sent
+                    # Calculate approximate tokens
                     total_chars = sum(len(c) for c in chunks)
-                    approx_tokens = total_chars // 4  # Rough estimate: 4 chars ≈ 1 token
+                    approx_tokens = total_chars // 4
                     
-                    # Show token usage to user
-                    with st.expander(f"📊 Context: {len(chunks)} chunks, ~{approx_tokens:,} tokens"):
-                        st.caption(f"Using {len(chunks)} contextual chunks with sentence preservation")
-                        st.caption(f"Context size: {total_chars:,} characters ≈ {approx_tokens:,} tokens")
-                        st.caption("✨ Smart chunking with overlap for better context continuity")
+                    # Show initial search info
+                    with st.expander(f"📊 Initial Search: {len(chunks)} chunks, ~{approx_tokens:,} tokens"):
+                        st.caption(f"Stage 1: Searching top {len(chunks)} most relevant chunks")
                     
-                    # Get answer from Claude with optimized contextual chunks
+                    # Get initial answer from Claude
                     answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
+                    
+                    # STAGE 2: Check if answer is uncertain or incomplete
+                    # Look for uncertainty indicators in the response
+                    uncertainty_phrases = [
+                        "i don't see",
+                        "i cannot find",
+                        "not mentioned",
+                        "doesn't appear",
+                        "no information",
+                        "not provided",
+                        "unable to find",
+                        "can't find",
+                        "isn't in",
+                        "aren't in",
+                        "not in the",
+                        "based on the provided",
+                        "document doesn't mention",
+                        "text doesn't contain"
+                    ]
+                    
+                    answer_lower = answer.lower()
+                    is_uncertain = any(phrase in answer_lower for phrase in uncertainty_phrases)
+                    
+                    # If answer seems uncertain, do a second-stage search
+                    if is_uncertain:
+                        with st.status("🔍 Initial search incomplete. Searching additional chunks...", expanded=True) as status:
+                            st.write("Detected potential gap in information")
+                            st.write("Expanding search to additional document sections...")
+                            
+                            # Get more chunks (next 20 chunks beyond the first 12)
+                            extended_results = current_chat['embedding_manager'].search(prompt, top_k=32)
+                            
+                            # Get chunks 13-32 (the ones we didn't check initially)
+                            additional_chunks = [chunk for chunk, score in extended_results[12:32]]
+                            
+                            st.write(f"Searching {len(additional_chunks)} additional chunks...")
+                            
+                            # Combine initial chunks with additional chunks
+                            all_chunks = chunks + additional_chunks
+                            
+                            # Calculate new token count
+                            total_chars_extended = sum(len(c) for c in all_chunks)
+                            approx_tokens_extended = total_chars_extended // 4
+                            
+                            st.write(f"Extended search: {len(all_chunks)} total chunks, ~{approx_tokens_extended:,} tokens")
+                            
+                            # Ask Claude again with expanded context
+                            expanded_answer = st.session_state.claude_agent.ask(
+                                f"{prompt}\n\nNote: This is an expanded search after initial results were insufficient. Please provide a comprehensive answer if the information is now available.",
+                                all_chunks,
+                                max_tokens=3000
+                            )
+                            
+                            status.update(label="✅ Extended search complete", state="complete")
+                            
+                            # Show comparison
+                            with st.expander("🔄 Search Strategy Used"):
+                                st.caption("**Stage 1:** Searched top 12 chunks → Information incomplete")
+                                st.caption(f"**Stage 2:** Expanded to {len(all_chunks)} chunks for comprehensive search")
+                                st.caption(f"Total context: {total_chars_extended:,} characters ≈ {approx_tokens_extended:,} tokens")
+                            
+                            answer = expanded_answer
+                    else:
+                        # Answer was complete, show success
+                        with st.expander("✅ Search Results"):
+                            st.caption(f"Found answer in initial {len(chunks)} chunks")
+                            st.caption(f"Context size: {total_chars:,} characters ≈ {approx_tokens:,} tokens")
+                    
                 else:
                     # No documents - just chat with Claude directly
                     message = st.session_state.claude_agent.client.messages.create(
