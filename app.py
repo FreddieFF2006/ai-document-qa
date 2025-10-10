@@ -5,6 +5,8 @@ from docx import Document as DocxDocument
 import re
 import os
 from dotenv import load_dotenv
+import uuid
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
@@ -111,10 +113,12 @@ def extract_text_from_txt(file):
     """Extract text from text file"""
     return file.read().decode('utf-8')
 
-def process_uploaded_files(uploaded_files):
+def process_uploaded_files(uploaded_files, chat_id):
     """Process uploaded files and return chunks"""
-    if not st.session_state.embedding_manager:
-        st.session_state.embedding_manager = EmbeddingManager()
+    current_chat = st.session_state.chats[chat_id]
+    
+    if not current_chat['embedding_manager']:
+        current_chat['embedding_manager'] = EmbeddingManager()
     
     all_chunks = []
     processed_files = []
@@ -146,14 +150,35 @@ def process_uploaded_files(uploaded_files):
             st.warning(f"⚠️ Could not process {uploaded_file.name}: {str(e)}")
     
     if all_chunks:
-        # Add to existing chunks or create new index
-        st.session_state.chunks.extend(all_chunks)
-        st.session_state.embedding_manager.build_index(st.session_state.chunks)
-        st.session_state.processed_files.extend(processed_files)
+        current_chat['chunks'].extend(all_chunks)
+        current_chat['embedding_manager'].build_index(current_chat['chunks'])
+        current_chat['processed_files'].extend(processed_files)
         
         return len(processed_files), len(all_chunks), total_chars
     
     return 0, 0, 0
+
+def generate_chat_title(first_message):
+    """Generate a short title from the first message"""
+    # Take first 40 characters and add ellipsis if needed
+    title = first_message[:40]
+    if len(first_message) > 40:
+        title += "..."
+    return title
+
+def create_new_chat():
+    """Create a new chat session"""
+    chat_id = str(uuid.uuid4())
+    st.session_state.chats[chat_id] = {
+        'title': 'New Chat',
+        'messages': [],
+        'chunks': [],
+        'embedding_manager': None,
+        'processed_files': [],
+        'created_at': datetime.now()
+    }
+    st.session_state.current_chat_id = chat_id
+    return chat_id
 
 # Check for API key
 api_key = os.getenv('ANTHROPIC_API_KEY')
@@ -163,72 +188,101 @@ if not api_key:
     st.info("Please make sure your .env file contains: ANTHROPIC_API_KEY=your-key-here")
     st.stop()
 
-# Initialize session state
-if 'chunks' not in st.session_state:
-    st.session_state.chunks = []
-if 'embedding_manager' not in st.session_state:
-    st.session_state.embedding_manager = None
+# Initialize Claude agent (shared across all chats)
 if 'claude_agent' not in st.session_state:
     try:
         st.session_state.claude_agent = ClaudeAIAgent(api_key)
     except Exception as e:
         st.error(f"Error initializing Claude: {e}")
         st.stop()
-if 'processed_files' not in st.session_state:
-    st.session_state.processed_files = []
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+
+# Initialize chats dictionary
+if 'chats' not in st.session_state:
+    st.session_state.chats = {}
+    create_new_chat()
+
+# Initialize current chat ID
+if 'current_chat_id' not in st.session_state:
+    if st.session_state.chats:
+        st.session_state.current_chat_id = list(st.session_state.chats.keys())[0]
+    else:
+        create_new_chat()
 
 # Header
 st.title("🤖 AI Document Q&A Assistant")
 st.markdown("Upload your documents and ask questions!")
 
-# Sidebar - Show loaded documents only
+# Sidebar - Chat management
 with st.sidebar:
-    st.header("📚 Loaded Documents")
+    st.header("💬 Chats")
     
-    if st.session_state.processed_files:
-        for i, file in enumerate(st.session_state.processed_files, 1):
-            st.text(f"{i}. {file}")
-        st.info(f"Total chunks: {len(st.session_state.chunks)}")
+    # New chat button
+    if st.button("➕ New Chat", use_container_width=True):
+        create_new_chat()
+        st.rerun()
+    
+    st.markdown("---")
+    
+    # List all chats
+    chat_items = sorted(st.session_state.chats.items(), 
+                       key=lambda x: x[1]['created_at'], 
+                       reverse=True)
+    
+    for chat_id, chat_data in chat_items:
+        col1, col2 = st.columns([4, 1])
         
-        # Clear documents button
-        if st.button("🗑️ Clear All Documents"):
-            st.session_state.chunks = []
-            st.session_state.embedding_manager = None
-            st.session_state.processed_files = []
-            st.session_state.chat_history = []
-            st.rerun()
-    else:
-        st.info("No documents loaded yet")
-    
-    # Clear chat button
-    if st.session_state.chat_history:
-        st.markdown("---")
-        if st.button("💬 Clear Chat History"):
-            st.session_state.chat_history = []
-            st.rerun()
+        with col1:
+            # Chat button
+            is_current = chat_id == st.session_state.current_chat_id
+            button_type = "primary" if is_current else "secondary"
+            
+            if st.button(
+                f"{'📍' if is_current else '💬'} {chat_data['title']}", 
+                key=f"chat_{chat_id}",
+                use_container_width=True,
+                type=button_type
+            ):
+                st.session_state.current_chat_id = chat_id
+                st.rerun()
+        
+        with col2:
+            # Delete button
+            if st.button("🗑️", key=f"delete_{chat_id}"):
+                if len(st.session_state.chats) > 1:
+                    del st.session_state.chats[chat_id]
+                    # Switch to another chat
+                    if st.session_state.current_chat_id == chat_id:
+                        st.session_state.current_chat_id = list(st.session_state.chats.keys())[0]
+                    st.rerun()
+                else:
+                    st.warning("Cannot delete the last chat!")
+
+# Get current chat
+current_chat = st.session_state.chats[st.session_state.current_chat_id]
 
 # Main chat interface
-st.header("💬 Chat")
+st.header(f"💬 {current_chat['title']}")
+
+# Show document count for current chat
+if current_chat['processed_files']:
+    st.caption(f"📚 {len(current_chat['processed_files'])} document(s) loaded | {len(current_chat['chunks'])} chunks")
 
 # File uploader above chat
 uploaded_files = st.file_uploader(
-    "📎 Upload documents to add to knowledge base",
+    "📎 Upload documents to add to this chat",
     type=['pdf', 'docx', 'doc', 'txt', 'pptx', 'ppt'],
     accept_multiple_files=True,
-    help="Upload PDF, Word, PowerPoint, or text files - they will be processed automatically",
-    key="main_uploader"
+    help="Upload PDF, Word, PowerPoint, or text files",
+    key=f"uploader_{st.session_state.current_chat_id}"
 )
 
 # Auto-process when files are uploaded
 if uploaded_files:
-    # Check if these are new files (not already processed)
-    new_files = [f for f in uploaded_files if f.name not in st.session_state.processed_files]
+    new_files = [f for f in uploaded_files if f.name not in current_chat['processed_files']]
     
     if new_files:
         with st.spinner(f"Processing {len(new_files)} file(s)..."):
-            num_files, num_chunks, total_chars = process_uploaded_files(new_files)
+            num_files, num_chunks, total_chars = process_uploaded_files(new_files, st.session_state.current_chat_id)
             
             if num_files > 0:
                 st.success(f"✅ Processed {num_files} file(s): {num_chunks} chunks, {total_chars:,} characters")
@@ -236,20 +290,24 @@ if uploaded_files:
                 st.error("Could not extract text from the uploaded files")
 
 # Display chat history
-for message in st.session_state.chat_history:
+for message in current_chat['messages']:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
 # Chat input
-if not st.session_state.processed_files:
+if not current_chat['processed_files']:
     st.info("👆 Upload documents above to get started!")
 
 if prompt := st.chat_input("Ask a question about your documents..."):
-    if not st.session_state.embedding_manager:
+    if not current_chat['embedding_manager']:
         st.error("Please upload documents first!")
     else:
+        # Update chat title if this is the first message
+        if len(current_chat['messages']) == 0:
+            current_chat['title'] = generate_chat_title(prompt)
+        
         # Add user message to chat
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        current_chat['messages'].append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
         
@@ -257,17 +315,17 @@ if prompt := st.chat_input("Ask a question about your documents..."):
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 try:
-                    # Search for relevant chunks
-                    results = st.session_state.embedding_manager.search(prompt, top_k=12)
+                    # Search for relevant chunks in current chat
+                    results = current_chat['embedding_manager'].search(prompt, top_k=12)
                     chunks = [c for c, _ in results]
                     
                     # Get answer from Claude
                     answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
                     
                     st.markdown(answer)
-                    st.session_state.chat_history.append({"role": "assistant", "content": answer})
+                    current_chat['messages'].append({"role": "assistant", "content": answer})
                     
                 except Exception as e:
                     error_msg = f"Error: {str(e)}"
                     st.error(error_msg)
-                    st.session_state.chat_history.append({"role": "assistant", "content": error_msg})
+                    current_chat['messages'].append({"role": "assistant", "content": error_msg})
