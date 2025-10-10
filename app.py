@@ -13,6 +13,23 @@ load_dotenv()
 
 st.set_page_config(page_title="AI Document Q&A", page_icon="🤖", layout="wide")
 
+# Add custom CSS for better button alignment
+st.markdown("""
+<style>
+    /* Center the icons in buttons */
+    .stButton button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    /* Make chat buttons take full width */
+    div[data-testid="column"] button {
+        width: 100%;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 def smart_chunk_text(text, min_chunk_size=1500, max_chunk_size=2500):
     """Smart chunking that preserves paragraph structure"""
     paragraphs = re.split(r'\n\s*\n', text)
@@ -160,7 +177,6 @@ def process_uploaded_files(uploaded_files, chat_id):
 
 def generate_chat_title(first_message):
     """Generate a short title from the first message"""
-    # Take first 40 characters and add ellipsis if needed
     title = first_message[:40]
     if len(first_message) > 40:
         title += "..."
@@ -229,15 +245,16 @@ with st.sidebar:
                        reverse=True)
     
     for chat_id, chat_data in chat_items:
-        col1, col2 = st.columns([4, 1])
+        col1, col2 = st.columns([5, 1])
         
         with col1:
             # Chat button
             is_current = chat_id == st.session_state.current_chat_id
             button_type = "primary" if is_current else "secondary"
+            icon = "📍" if is_current else "💬"
             
             if st.button(
-                f"{'📍' if is_current else '💬'} {chat_data['title']}", 
+                f"{icon} {chat_data['title']}", 
                 key=f"chat_{chat_id}",
                 use_container_width=True,
                 type=button_type
@@ -246,8 +263,8 @@ with st.sidebar:
                 st.rerun()
         
         with col2:
-            # Delete button
-            if st.button("🗑️", key=f"delete_{chat_id}"):
+            # Delete button - centered
+            if st.button("🗑️", key=f"delete_{chat_id}", use_container_width=True):
                 if len(st.session_state.chats) > 1:
                     del st.session_state.chats[chat_id]
                     # Switch to another chat
@@ -269,10 +286,10 @@ if current_chat['processed_files']:
 
 # File uploader above chat
 uploaded_files = st.file_uploader(
-    "📎 Upload documents to add to this chat",
+    "📎 Upload documents to add to this chat (optional)",
     type=['pdf', 'docx', 'doc', 'txt', 'pptx', 'ppt'],
     accept_multiple_files=True,
-    help="Upload PDF, Word, PowerPoint, or text files",
+    help="Upload PDF, Word, PowerPoint, or text files - or just chat without documents!",
     key=f"uploader_{st.session_state.current_chat_id}"
 )
 
@@ -294,38 +311,43 @@ for message in current_chat['messages']:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Chat input
-if not current_chat['processed_files']:
-    st.info("👆 Upload documents above to get started!")
-
-if prompt := st.chat_input("Ask a question about your documents..."):
-    if not current_chat['embedding_manager']:
-        st.error("Please upload documents first!")
-    else:
-        # Update chat title if this is the first message
-        if len(current_chat['messages']) == 0:
-            current_chat['title'] = generate_chat_title(prompt)
-        
-        # Add user message to chat
-        current_chat['messages'].append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        # Generate response
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
+# Chat input - works with or without documents
+if prompt := st.chat_input("Ask me anything..."):
+    # Update chat title if this is the first message
+    if len(current_chat['messages']) == 0:
+        current_chat['title'] = generate_chat_title(prompt)
+    
+    # Add user message to chat
+    current_chat['messages'].append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    # Generate response
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            try:
+                # Check if we have documents
+                if current_chat['embedding_manager'] and current_chat['chunks']:
                     # Search for relevant chunks in current chat
                     results = current_chat['embedding_manager'].search(prompt, top_k=12)
                     chunks = [c for c, _ in results]
                     
-                    # Get answer from Claude
+                    # Get answer from Claude with document context
                     answer = st.session_state.claude_agent.ask(prompt, chunks, max_tokens=3000)
-                    
-                    st.markdown(answer)
-                    current_chat['messages'].append({"role": "assistant", "content": answer})
-                    
-                except Exception as e:
-                    error_msg = f"Error: {str(e)}"
-                    st.error(error_msg)
-                    current_chat['messages'].append({"role": "assistant", "content": error_msg})
+                else:
+                    # No documents - just chat with Claude directly
+                    # Create a simple message without document context
+                    message = st.session_state.claude_agent.client.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=3000,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    answer = message.content[0].text
+                
+                st.markdown(answer)
+                current_chat['messages'].append({"role": "assistant", "content": answer})
+                
+            except Exception as e:
+                error_msg = f"Error: {str(e)}"
+                st.error(error_msg)
+                current_chat['messages'].append({"role": "assistant", "content": error_msg})
