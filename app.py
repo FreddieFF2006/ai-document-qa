@@ -13,7 +13,7 @@ load_dotenv()
 
 st.set_page_config(page_title="AI Document Q&A", page_icon="🤖", layout="wide")
 
-# Add custom CSS for better styling
+# Add custom CSS for clean styling
 st.markdown("""
 <style>
     /* Center the icons in buttons */
@@ -28,12 +28,37 @@ st.markdown("""
         width: 100%;
     }
     
-    /* Style for attach button to look integrated */
-    .attach-btn button {
-        background-color: transparent;
-        border: none;
+    /* Hide file uploader label completely */
+    .stFileUploader label {
+        display: none !important;
+    }
+    
+    /* Style file uploader to look like a clean button */
+    .stFileUploader {
+        padding: 0 !important;
+    }
+    
+    /* Style the file uploader button */
+    .stFileUploader > div {
+        padding: 0 !important;
+    }
+    
+    .stFileUploader button {
+        background-color: #f0f2f6;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
         padding: 0.5rem;
-        font-size: 1.5rem;
+        font-size: 1.2rem;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .stFileUploader button:hover {
+        background-color: #e0e0e0;
+        border-color: #d0d0d0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -298,19 +323,20 @@ for message in current_chat['messages']:
         st.markdown(message["content"])
 
 # Chat input area with attach button on the left (like Claude/ChatGPT)
-col1, col2 = st.columns([0.7, 9.3])
+input_col1, input_col2 = st.columns([0.6, 9.4])
 
-with col1:
-    # File uploader styled as a button
+with input_col1:
+    # File uploader with just a plus sign
+    st.markdown('<div style="padding-top: 5px;">➕</div>', unsafe_allow_html=True)
     uploaded_files = st.file_uploader(
-        "📎",
+        "+",
         type=['pdf', 'docx', 'doc', 'txt', 'pptx', 'ppt'],
         accept_multiple_files=True,
         key=f"uploader_{st.session_state.current_chat_id}",
         label_visibility="collapsed"
     )
 
-with col2:
+with input_col2:
     # Chat input
     prompt = st.chat_input("Ask me anything...")
 
