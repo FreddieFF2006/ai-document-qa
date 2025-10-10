@@ -1,0 +1,12 @@
+streamlit
+anthropic
+pypdf2
+python-docx
+openpyxl
+pillow
+sentence-transformers
+numpy
+faiss-cpu
+python-dotenv
+python-pptx
+pandas
