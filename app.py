@@ -93,6 +93,20 @@ def extract_text_from_pptx(file):
     except:
         return ""
 
+def extract_text_from_excel(file):
+    """Extract text from Excel"""
+    try:
+        import pandas as pd
+        excel_file = pd.ExcelFile(file)
+        all_text = ""
+        for sheet_name in excel_file.sheet_names:
+            df = pd.read_excel(file, sheet_name=sheet_name)
+            all_text += f"\n=== Sheet: {sheet_name} ===\n\n"
+            all_text += df.to_string(index=False) + "\n\n"
+        return all_text
+    except ImportError:
+        return ""
+
 def extract_text_from_txt(file):
     """Extract text from text file"""
     return file.read().decode('utf-8')
@@ -128,11 +142,6 @@ st.markdown("Upload your documents and ask questions!")
 # Sidebar for file upload
 with st.sidebar:
     st.header("📁 Upload Documents")
-    
-    # Show API key status (masked)
-    if api_key:
-        masked_key = api_key[:8] + "..." + api_key[-4:]
-        st.success(f"✅ API Key: {masked_key}")
     
     uploaded_files = st.file_uploader(
         "Choose files",
