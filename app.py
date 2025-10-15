@@ -83,18 +83,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def smart_chunk_text(text, chunk_size=3000, overlap=150):
+def smart_chunk_text(text, chunk_size=1500, overlap=100):
     """
-    Optimized chunking with LARGE chunks for maximum efficiency
+    Optimized chunking with smaller chunks for better precision
     
     Args:
-        chunk_size: Target size for each chunk (default: 3000)
-        overlap: Minimal overlap for context (default: 150)
+        chunk_size: Target size for each chunk (default: 1500)
+        overlap: Minimal overlap for context (default: 100)
     
     Features:
-    - Very large chunks = fewer total chunks = much faster
-    - Minimal overlap = less redundancy
-    - E5-Large-v2 handles large chunks well
+    - Smaller chunks = more precise retrieval
+    - Better granularity for answering specific questions
+    - E5-Large-v2 handles these well
     - Preserves paragraph boundaries
     """
     
@@ -117,7 +117,7 @@ def smart_chunk_text(text, chunk_size=3000, overlap=150):
                 current_chunk = para
         else:
             # Save current chunk if substantial
-            if len(current_chunk) > 500:  # Only save if meaningful size
+            if len(current_chunk) > 300:  # Lowered threshold for smaller chunks
                 chunks.append(current_chunk)
             
             # Handle oversized paragraphs
@@ -130,7 +130,7 @@ def smart_chunk_text(text, chunk_size=3000, overlap=150):
                     if len(temp_chunk) + len(sentence) + 1 <= chunk_size:
                         temp_chunk += (" " if temp_chunk else "") + sentence
                     else:
-                        if len(temp_chunk) > 500:
+                        if len(temp_chunk) > 300:
                             chunks.append(temp_chunk)
                         temp_chunk = sentence
                 
@@ -139,16 +139,16 @@ def smart_chunk_text(text, chunk_size=3000, overlap=150):
                 current_chunk = para
     
     # Add final chunk if substantial
-    if len(current_chunk.strip()) > 500:
+    if len(current_chunk.strip()) > 300:
         chunks.append(current_chunk.strip())
     
     # Aggressive duplicate removal
     unique_chunks = []
     seen = set()
     for chunk in chunks:
-        # Use first 150 chars as fingerprint
-        fingerprint = chunk[:150].lower().strip()
-        if fingerprint not in seen and len(chunk) > 500:
+        # Use first 100 chars as fingerprint
+        fingerprint = chunk[:100].lower().strip()
+        if fingerprint not in seen and len(chunk) > 300:
             seen.add(fingerprint)
             unique_chunks.append(chunk)
     
@@ -304,8 +304,8 @@ def process_uploaded_files(uploaded_files, chat_id):
                 total_chars += len(text)
                 
                 # Show chunking progress
-                status_text.text(f"Creating optimized chunks for {uploaded_file.name}...")
-                chunks = smart_chunk_text(text, chunk_size=3000, overlap=150)
+                status_text.text(f"Creating precise chunks for {uploaded_file.name}...")
+                chunks = smart_chunk_text(text, chunk_size=1500, overlap=100)
                 
                 chunks_with_source = [f"[Source: {uploaded_file.name}]\n\n{chunk}" for chunk in chunks]
                 all_chunks.extend(chunks_with_source)
@@ -484,7 +484,7 @@ if st.session_state.show_file_uploader:
                 else:
                     st.error("Could not extract text from the uploaded files")
 
-# Handle chat input - SINGLE STAGE RETRIEVAL ONLY
+# Handle chat input - RETRIEVES MORE CHUNKS
 if prompt:
     # Update chat title if this is the first message
     if len(current_chat['messages']) == 0:
@@ -501,8 +501,8 @@ if prompt:
             try:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
-                    # SINGLE STAGE: Get top 8 chunks
-                    results = current_chat['embedding_manager'].search(prompt, top_k=8)
+                    # RETRIEVE 15 CHUNKS (increased from 8)
+                    results = current_chat['embedding_manager'].search(prompt, top_k=15)
                     chunks = [chunk for chunk, score in results]
                     
                     # Calculate approximate tokens
@@ -513,6 +513,7 @@ if prompt:
                     with st.expander(f"📊 Search: {len(chunks)} chunks, ~{approx_tokens:,} tokens"):
                         st.caption(f"Retrieved {len(chunks)} most relevant chunks")
                         st.caption(f"Context size: {total_chars:,} characters ≈ {approx_tokens:,} tokens")
+                        st.caption("✨ Using smaller chunks for better precision")
                     
                     # Get answer from Claude WITH CONVERSATION MEMORY
                     answer = st.session_state.claude_agent.ask(
