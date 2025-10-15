@@ -1,37 +1,80 @@
 from sentence_transformers import SentenceTransformer
-import faiss
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
 import numpy as np
 from anthropic import Anthropic
+import uuid
 
 class EmbeddingManager:
-    def __init__(self, model_name='all-MiniLM-L6-v2'):
-        """Initialize the embedding model"""
+    def __init__(self, model_name='intfloat/e5-large-v2'):
+        """Initialize the E5-Large-v2 embedding model with Qdrant"""
+        print(f"Loading embedding model: {model_name}")
         self.model = SentenceTransformer(model_name)
-        self.index = None
+        
+        # Initialize Qdrant client (in-memory mode)
+        self.client = QdrantClient(":memory:")
+        self.collection_name = f"documents_{uuid.uuid4().hex[:8]}"
         self.chunks = []
+        self.dimension = 1024  # E5-Large-v2 produces 1024-dimensional embeddings
     
     def build_index(self, text_chunks):
-        """Build FAISS index from text chunks"""
+        """Build Qdrant vector database from text chunks"""
         self.chunks = text_chunks
-        embeddings = self.model.encode(text_chunks)
         
-        # Create FAISS index
-        dimension = embeddings.shape[1]
-        self.index = faiss.IndexFlatL2(dimension)
-        self.index.add(np.array(embeddings).astype('float32'))
+        print(f"Creating embeddings for {len(text_chunks)} chunks...")
+        
+        # E5 models require "query: " prefix for queries and "passage: " for documents
+        passages = [f"passage: {chunk}" for chunk in text_chunks]
+        embeddings = self.model.encode(passages, show_progress_bar=True)
+        
+        # Create collection with cosine distance
+        self.client.create_collection(
+            collection_name=self.collection_name,
+            vectors_config=VectorParams(
+                size=self.dimension,
+                distance=Distance.COSINE  # Using cosine similarity
+            )
+        )
+        
+        # Upload vectors to Qdrant
+        points = [
+            PointStruct(
+                id=idx,
+                vector=embedding.tolist(),
+                payload={"text": chunk, "chunk_id": idx}
+            )
+            for idx, (chunk, embedding) in enumerate(zip(text_chunks, embeddings))
+        ]
+        
+        self.client.upsert(
+            collection_name=self.collection_name,
+            points=points
+        )
+        
+        print(f"✅ Indexed {len(text_chunks)} chunks in Qdrant with cosine distance")
     
     def search(self, query, top_k=5):
-        """Search for most relevant chunks"""
-        if self.index is None:
+        """Search for most relevant chunks using cosine similarity"""
+        if not self.chunks:
             return []
         
-        query_embedding = self.model.encode([query])
-        distances, indices = self.index.search(np.array(query_embedding).astype('float32'), top_k)
+        # E5 models require "query: " prefix for search queries
+        query_with_prefix = f"query: {query}"
+        query_embedding = self.model.encode([query_with_prefix])[0]
         
+        # Search in Qdrant
+        search_results = self.client.search(
+            collection_name=self.collection_name,
+            query_vector=query_embedding.tolist(),
+            limit=top_k
+        )
+        
+        # Return chunks with similarity scores (higher is better with cosine)
         results = []
-        for idx, distance in zip(indices[0], distances[0]):
-            if idx < len(self.chunks):
-                results.append((self.chunks[idx], float(distance)))
+        for hit in search_results:
+            chunk_text = hit.payload["text"]
+            similarity_score = hit.score  # Cosine similarity (0-1, higher is better)
+            results.append((chunk_text, similarity_score))
         
         return results
 

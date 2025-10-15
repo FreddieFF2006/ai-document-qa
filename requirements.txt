@@ -11,3 +11,4 @@ python-dotenv
 python-pptx
 pandas
 pycryptodome
+qdrant-client
