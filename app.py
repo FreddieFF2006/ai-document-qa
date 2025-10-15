@@ -83,75 +83,81 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def smart_chunk_text(text, chunk_size=1500, overlap=100):
+def smart_chunk_text(text, chunk_size=1200, overlap=200):
     """
-    Optimized chunking - faster processing, less redundancy
+    Advanced chunking with sentence preservation, paragraph structure, and overlap
     
     Args:
-        chunk_size: Target size for each chunk in characters (default: 1500 - larger chunks)
-        overlap: Reduced overlap for less redundancy (default: 100 - was 200)
+        chunk_size: Target size for each chunk in characters (default: 1200)
+        overlap: Number of characters to overlap between chunks for context continuity (default: 200)
     
     Features:
-    - Larger chunks = fewer total chunks = faster processing
-    - Reduced overlap = less redundancy
-    - Still preserves sentence boundaries
+    - Preserves complete sentences (never cuts mid-sentence)
     - Maintains paragraph structure
+    - Creates overlap between chunks for context
+    - Ensures semantic continuity
     """
     
-    # Split by paragraphs
-    paragraphs = re.split(r'\n\s*\n+', text)
+    # Split into paragraphs first (preserve structure)
+    paragraphs = re.split(r'\n\s*\n', text)
     
     chunks = []
     current_chunk = ""
+    previous_sentences = []  # For overlap
     
     for para in paragraphs:
         para = para.strip()
         if not para:
             continue
         
-        # If adding this paragraph is within size limit, add it
-        if len(current_chunk) + len(para) + 2 <= chunk_size:
-            if current_chunk:
-                current_chunk += "\n\n" + para
-            else:
-                current_chunk = para
-        else:
-            # Save current chunk if it has content
-            if current_chunk:
-                chunks.append(current_chunk)
+        # Split paragraph into sentences (preserve complete sentences)
+        # This regex handles periods, exclamation marks, and question marks
+        sentences = re.split(r'(?<=[.!?])\s+', para)
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
             
-            # If paragraph itself is too large, split by sentences
-            if len(para) > chunk_size:
-                sentences = re.split(r'(?<=[.!?])\s+', para)
-                temp_chunk = ""
-                
-                for sentence in sentences:
-                    if len(temp_chunk) + len(sentence) + 1 <= chunk_size:
-                        temp_chunk += (" " if temp_chunk else "") + sentence
+            # Check if adding this sentence would exceed chunk size
+            potential_chunk = current_chunk + ("\n\n" if current_chunk and not current_chunk.endswith("\n\n") else "") + sentence + " "
+            
+            if len(potential_chunk) <= chunk_size:
+                # Add sentence to current chunk
+                if current_chunk:
+                    # Check if we're in same paragraph or new one
+                    if sentences.index(sentence) == 0 and current_chunk:
+                        current_chunk += "\n\n" + sentence + " "
                     else:
-                        if temp_chunk:
-                            chunks.append(temp_chunk)
-                        temp_chunk = sentence
+                        current_chunk += sentence + " "
+                else:
+                    current_chunk = sentence + " "
                 
-                current_chunk = temp_chunk
+                # Track recent sentences for overlap
+                previous_sentences.append(sentence)
+                if len(' '.join(previous_sentences)) > overlap:
+                    previous_sentences.pop(0)
             else:
-                current_chunk = para
+                # Current chunk is full, save it
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                
+                # Start new chunk with overlap from previous chunk
+                overlap_text = ' '.join(previous_sentences[-3:]) if len(previous_sentences) >= 3 else ' '.join(previous_sentences)
+                
+                if overlap_text and len(overlap_text) > 50:  # Only add overlap if substantial
+                    current_chunk = "[...continued] " + overlap_text + " " + sentence + " "
+                else:
+                    current_chunk = sentence + " "
+                
+                # Reset overlap tracking
+                previous_sentences = [sentence]
     
     # Add final chunk
-    if current_chunk and len(current_chunk.strip()) > 200:
+    if current_chunk and len(current_chunk.strip()) > 100:
         chunks.append(current_chunk.strip())
     
-    # Remove duplicate chunks (exact matches)
-    unique_chunks = []
-    seen = set()
-    for chunk in chunks:
-        # Use first 100 chars as fingerprint to detect near-duplicates
-        fingerprint = chunk[:100].lower().strip()
-        if fingerprint not in seen:
-            seen.add(fingerprint)
-            unique_chunks.append(chunk)
-    
-    return unique_chunks
+    return chunks
 
 def extract_text_from_pdf(file):
     """Extract text from PDF with multiple fallback methods"""
@@ -261,7 +267,7 @@ def extract_text_from_txt(file):
     return file.read().decode('utf-8')
 
 def process_uploaded_files(uploaded_files, chat_id):
-    """Process uploaded files and return chunks with progress tracking"""
+    """Process uploaded files and return chunks"""
     current_chat = st.session_state.chats[chat_id]
     
     if not current_chat['embedding_manager']:
@@ -271,19 +277,8 @@ def process_uploaded_files(uploaded_files, chat_id):
     processed_files = []
     total_chars = 0
     
-    # Progress tracking
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    total_files = len(uploaded_files)
-    
-    for idx, uploaded_file in enumerate(uploaded_files):
+    for uploaded_file in uploaded_files:
         file_ext = uploaded_file.name.split('.')[-1].lower()
-        
-        # Update progress
-        progress = (idx + 1) / total_files
-        progress_bar.progress(progress)
-        status_text.text(f"Processing {uploaded_file.name} ({idx + 1}/{total_files})...")
         
         try:
             if file_ext == 'pdf':
@@ -299,11 +294,7 @@ def process_uploaded_files(uploaded_files, chat_id):
             
             if text and len(text.strip()) > 0:
                 total_chars += len(text)
-                
-                # Show chunking progress
-                status_text.text(f"Creating chunks for {uploaded_file.name}...")
-                chunks = smart_chunk_text(text, chunk_size=1500, overlap=100)
-                
+                chunks = smart_chunk_text(text, chunk_size=1200, overlap=200)
                 chunks_with_source = [f"[Source: {uploaded_file.name}]\n\n{chunk}" for chunk in chunks]
                 all_chunks.extend(chunks_with_source)
                 processed_files.append(uploaded_file.name)
@@ -311,16 +302,10 @@ def process_uploaded_files(uploaded_files, chat_id):
         except Exception as e:
             st.warning(f"⚠️ Could not process {uploaded_file.name}: {str(e)}")
     
-    # Clear progress indicators
-    progress_bar.empty()
-    status_text.empty()
-    
     if all_chunks:
-        # Show embedding progress
-        with st.spinner(f"Creating embeddings for {len(all_chunks)} chunks..."):
-            current_chat['chunks'].extend(all_chunks)
-            current_chat['embedding_manager'].build_index(current_chat['chunks'])
-            current_chat['processed_files'].extend(processed_files)
+        current_chat['chunks'].extend(all_chunks)
+        current_chat['embedding_manager'].build_index(current_chat['chunks'])
+        current_chat['processed_files'].extend(processed_files)
         
         return len(processed_files), len(all_chunks), total_chars
     
@@ -498,7 +483,7 @@ if prompt:
             try:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
-                    # STAGE 1: Initial retrieval - get top 8 chunks
+                    # STAGE 1: Initial retrieval - get top 8 chunks (reduced from 12)
                     results = current_chat['embedding_manager'].search(prompt, top_k=8)
                     chunks = [chunk for chunk, score in results]
                     
