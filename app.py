@@ -160,11 +160,68 @@ def smart_chunk_text(text, chunk_size=1200, overlap=200):
     return chunks
 
 def extract_text_from_pdf(file):
-    """Extract text from PDF"""
-    reader = PdfReader(file)
+    """Extract text from PDF with multiple fallback methods"""
     text = ""
-    for page in reader.pages:
-        text += page.extract_text() + "\n"
+    
+    try:
+        # Method 1: Try PyPDF2 first (fastest)
+        reader = PdfReader(file)
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        
+        # If we got substantial text, return it
+        if len(text.strip()) > 100:
+            return text
+    except Exception as e:
+        print(f"PyPDF2 failed: {e}")
+    
+    # Method 2: Try pdfplumber (more robust)
+    try:
+        import pdfplumber
+        file.seek(0)  # Reset file pointer
+        
+        with pdfplumber.open(file) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        
+        if len(text.strip()) > 100:
+            return text
+    except ImportError:
+        print("pdfplumber not installed")
+    except Exception as e:
+        print(f"pdfplumber failed: {e}")
+    
+    # Method 3: Try pymupdf/fitz (most powerful)
+    try:
+        import fitz  # PyMuPDF
+        file.seek(0)  # Reset file pointer
+        
+        # Read file bytes
+        pdf_bytes = file.read()
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        
+        for page in doc:
+            page_text = page.get_text()
+            if page_text:
+                text += page_text + "\n"
+        
+        doc.close()
+        
+        if len(text.strip()) > 100:
+            return text
+    except ImportError:
+        print("PyMuPDF not installed")
+    except Exception as e:
+        print(f"PyMuPDF failed: {e}")
+    
+    # If all methods failed
+    if len(text.strip()) < 100:
+        raise Exception("Could not extract text from PDF. File may be corrupted, image-based, or encrypted.")
+    
     return text
 
 def extract_text_from_docx(file):
@@ -426,8 +483,8 @@ if prompt:
             try:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
-                    # STAGE 1: Initial retrieval - get top 12 chunks
-                    results = current_chat['embedding_manager'].search(prompt, top_k=12)
+                    # STAGE 1: Initial retrieval - get top 8 chunks (reduced from 12)
+                    results = current_chat['embedding_manager'].search(prompt, top_k=8)
                     chunks = [chunk for chunk, score in results]
                     
                     # Calculate approximate tokens
@@ -474,11 +531,11 @@ if prompt:
                             st.write("Detected potential gap in information")
                             st.write("Expanding search to additional document sections...")
                             
-                            # Get more chunks (next 20 chunks beyond the first 12)
-                            extended_results = current_chat['embedding_manager'].search(prompt, top_k=32)
+                            # Get more chunks (12 additional chunks beyond the first 8)
+                            extended_results = current_chat['embedding_manager'].search(prompt, top_k=20)
                             
-                            # Get chunks 13-32 (the ones we didn't check initially)
-                            additional_chunks = [chunk for chunk, score in extended_results[12:32]]
+                            # Get chunks 9-20 (the ones we didn't check initially)
+                            additional_chunks = [chunk for chunk, score in extended_results[8:20]]
                             
                             st.write(f"Searching {len(additional_chunks)} additional chunks...")
                             
@@ -503,7 +560,7 @@ if prompt:
                             
                             # Show comparison
                             with st.expander("🔄 Search Strategy Used"):
-                                st.caption("**Stage 1:** Searched top 12 chunks → Information incomplete")
+                                st.caption("**Stage 1:** Searched top 8 chunks → Information incomplete")
                                 st.caption(f"**Stage 2:** Expanded to {len(all_chunks)} chunks for comprehensive search")
                                 st.caption(f"Total context: {total_chars_extended:,} characters ≈ {approx_tokens_extended:,} tokens")
                             
