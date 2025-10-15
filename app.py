@@ -85,7 +85,7 @@ st.markdown("""
 
 def smart_chunk_text(text, chunk_size=1500, overlap=100):
     """
-    Optimized chunking with smaller chunks for better precision
+    Optimized chunking with smaller chunks for maximum precision
     
     Args:
         chunk_size: Target size for each chunk (default: 1500)
@@ -484,7 +484,7 @@ if st.session_state.show_file_uploader:
                 else:
                     st.error("Could not extract text from the uploaded files")
 
-# Handle chat input - RETRIEVES MORE CHUNKS
+# Handle chat input - MAXIMUM CHUNK RETRIEVAL
 if prompt:
     # Update chat title if this is the first message
     if len(current_chat['messages']) == 0:
@@ -501,25 +501,32 @@ if prompt:
             try:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
-                    # RETRIEVE 15 CHUNKS (increased from 8)
-                    results = current_chat['embedding_manager'].search(prompt, top_k=15)
+                    # RETRIEVE 25 CHUNKS (increased from 15 for maximum coverage)
+                    results = current_chat['embedding_manager'].search(prompt, top_k=25)
                     chunks = [chunk for chunk, score in results]
                     
                     # Calculate approximate tokens
                     total_chars = sum(len(c) for c in chunks)
                     approx_tokens = total_chars // 4
                     
-                    # Show search info
+                    # Show search info with more details
                     with st.expander(f"📊 Search: {len(chunks)} chunks, ~{approx_tokens:,} tokens"):
                         st.caption(f"Retrieved {len(chunks)} most relevant chunks")
                         st.caption(f"Context size: {total_chars:,} characters ≈ {approx_tokens:,} tokens")
-                        st.caption("✨ Using smaller chunks for better precision")
+                        st.caption("🔍 Maximum coverage mode - searching through extensive context")
+                        
+                        # Show top 5 chunk scores
+                        st.caption("**Top 5 relevance scores:**")
+                        for i, (chunk, score) in enumerate(results[:5], 1):
+                            # Extract first 60 chars as preview
+                            preview = chunk.replace("[Source:", "").strip()[:60] + "..."
+                            st.caption(f"{i}. Score: {score:.3f} - {preview}")
                     
                     # Get answer from Claude WITH CONVERSATION MEMORY
                     answer = st.session_state.claude_agent.ask(
                         prompt, 
                         chunks, 
-                        max_tokens=3000,
+                        max_tokens=4000,  # Increased from 3000 for longer answers
                         conversation_history=current_chat['messages']
                     )
                     
