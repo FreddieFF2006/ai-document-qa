@@ -384,7 +384,7 @@ if 'show_file_uploader' not in st.session_state:
 
 # Header
 st.title("🤖 AI Document Q&A Assistant")
-st.markdown("Upload your documents and ask questions!")
+st.markdown("Upload your documents and ask questions! **Powered by Claude Opus 4** 🧠")
 
 # Sidebar - Chat management
 with st.sidebar:
@@ -440,7 +440,7 @@ st.header(f"💬 {current_chat['title']}")
 
 # Show document count for current chat
 if current_chat['processed_files']:
-    st.caption(f"📚 {len(current_chat['processed_files'])} document(s) loaded | {len(current_chat['chunks'])} chunks")
+    st.caption(f"📚 {len(current_chat['processed_files'])} document(s) loaded | {len(current_chat['chunks'])} chunks | 🧠 Claude Opus 4")
 
 # Display chat history
 for message in current_chat['messages']:
@@ -484,7 +484,7 @@ if st.session_state.show_file_uploader:
                 else:
                     st.error("Could not extract text from the uploaded files")
 
-# Handle chat input - MAXIMUM CHUNK RETRIEVAL
+# Handle chat input - MAXIMUM CHUNK RETRIEVAL WITH OPUS
 if prompt:
     # Update chat title if this is the first message
     if len(current_chat['messages']) == 0:
@@ -497,7 +497,7 @@ if prompt:
     
     # Generate response
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
+        with st.spinner("🧠 Claude Opus 4 thinking..."):
             try:
                 # Check if we have documents
                 if current_chat['embedding_manager'] and current_chat['chunks']:
@@ -514,6 +514,7 @@ if prompt:
                         st.caption(f"Retrieved {len(chunks)} most relevant chunks")
                         st.caption(f"Context size: {total_chars:,} characters ≈ {approx_tokens:,} tokens")
                         st.caption("🔍 Maximum coverage mode - searching through extensive context")
+                        st.caption("🧠 **Powered by Claude Opus 4** - Maximum Intelligence")
                         
                         # Show top 5 chunk scores
                         st.caption("**Top 5 relevance scores:**")
@@ -522,7 +523,7 @@ if prompt:
                             preview = chunk.replace("[Source:", "").strip()[:60] + "..."
                             st.caption(f"{i}. Score: {score:.3f} - {preview}")
                     
-                    # Get answer from Claude WITH CONVERSATION MEMORY
+                    # Get answer from Claude Opus WITH CONVERSATION MEMORY
                     answer = st.session_state.claude_agent.ask(
                         prompt, 
                         chunks, 
@@ -531,10 +532,10 @@ if prompt:
                     )
                     
                 else:
-                    # No documents - just chat with Claude directly
+                    # No documents - just chat with Claude Opus directly
                     message = st.session_state.claude_agent.client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=3000,
+                        model="claude-opus-4-20250514",  # ✅ CLAUDE OPUS 4
+                        max_tokens=4000,
                         messages=[{"role": "user", "content": prompt}]
                     )
                     answer = message.content[0].text

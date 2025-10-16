@@ -1,49 +1,42 @@
 from sentence_transformers import SentenceTransformer
+import numpy as np
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
-import numpy as np
-from anthropic import Anthropic
-import uuid
+import anthropic
 
 class EmbeddingManager:
-    def __init__(self, model_name='intfloat/e5-large-v2'):
-        """Initialize the E5-Large-v2 embedding model with Qdrant"""
-        print(f"Loading embedding model: {model_name}")
-        self.model = SentenceTransformer(model_name)
-        
-        # Initialize Qdrant client (in-memory mode)
+    def __init__(self):
+        """Initialize E5-Large-v2 embeddings and Qdrant"""
+        print("Loading E5-Large-v2 model...")
+        self.model = SentenceTransformer('intfloat/e5-large-v2')
         self.client = QdrantClient(":memory:")
-        self.collection_name = f"documents_{uuid.uuid4().hex[:8]}"
+        self.collection_name = "documents"
         self.chunks = []
-        self.dimension = 1024  # E5-Large-v2 produces 1024-dimensional embeddings
-    
-    def build_index(self, text_chunks):
-        """Build Qdrant vector database from text chunks"""
-        self.chunks = text_chunks
         
-        print(f"Creating embeddings for {len(text_chunks)} chunks...")
+    def build_index(self, chunks):
+        """Build Qdrant index from text chunks"""
+        self.chunks = chunks
         
-        # E5 models require "query: " prefix for queries and "passage: " for documents
-        passages = [f"passage: {chunk}" for chunk in text_chunks]
-        embeddings = self.model.encode(passages, show_progress_bar=True)
+        print(f"Creating embeddings for {len(chunks)} chunks...")
+        embeddings = self.model.encode(chunks, show_progress_bar=True)
         
-        # Create collection with cosine distance
-        self.client.create_collection(
+        # Create collection
+        self.client.recreate_collection(
             collection_name=self.collection_name,
             vectors_config=VectorParams(
-                size=self.dimension,
-                distance=Distance.COSINE  # Using cosine similarity
+                size=embeddings.shape[1],
+                distance=Distance.COSINE
             )
         )
         
-        # Upload vectors to Qdrant
+        # Upload vectors
         points = [
             PointStruct(
                 id=idx,
-                vector=embedding.tolist(),
-                payload={"text": chunk, "chunk_id": idx}
+                vector=embeddings[idx].tolist(),
+                payload={"text": chunk}
             )
-            for idx, (chunk, embedding) in enumerate(zip(text_chunks, embeddings))
+            for idx, chunk in enumerate(chunks)
         ]
         
         self.client.upsert(
@@ -51,84 +44,63 @@ class EmbeddingManager:
             points=points
         )
         
-        print(f"✅ Indexed {len(text_chunks)} chunks in Qdrant with cosine distance")
+        print(f"✅ Index built with {len(chunks)} chunks")
     
-    def search(self, query, top_k=5):
-        """Search for most relevant chunks using cosine similarity"""
-        if not self.chunks:
-            return []
+    def search(self, query, top_k=25):
+        """Search for most relevant chunks"""
+        query_vector = self.model.encode([query])[0]
         
-        # E5 models require "query: " prefix for search queries
-        query_with_prefix = f"query: {query}"
-        query_embedding = self.model.encode([query_with_prefix])[0]
-        
-        # Search in Qdrant
-        search_results = self.client.search(
+        results = self.client.search(
             collection_name=self.collection_name,
-            query_vector=query_embedding.tolist(),
+            query_vector=query_vector.tolist(),
             limit=top_k
         )
         
-        # Return chunks with similarity scores (higher is better with cosine)
-        results = []
-        for hit in search_results:
-            chunk_text = hit.payload["text"]
-            similarity_score = hit.score  # Cosine similarity (0-1, higher is better)
-            results.append((chunk_text, similarity_score))
-        
-        return results
+        return [(hit.payload["text"], hit.score) for hit in results]
 
 class ClaudeAIAgent:
     def __init__(self, api_key):
-        """Initialize Claude AI client"""
-        self.client = Anthropic(api_key=api_key)
-    
-    def ask(self, question, context_chunks, max_tokens=2000, conversation_history=None):
-        """
-        Ask a question with document context and conversation memory
+        """Initialize Claude Opus 4 client"""
+        self.client = anthropic.Anthropic(api_key=api_key)
         
-        Args:
-            question: The user's question
-            context_chunks: List of relevant document chunks
-            max_tokens: Maximum tokens for response
-            conversation_history: List of previous messages for context
-        """
-        # Build context from chunks
-        context = "\n\n---\n\n".join(context_chunks)
+    def ask(self, question, chunks, max_tokens=4000, conversation_history=None):
+        """Ask a question with document context and conversation history"""
         
-        # Build messages array with conversation history
+        # Build conversation with memory
         messages = []
         
-        # Add conversation history if provided (last 10 messages to keep context manageable)
-        if conversation_history and len(conversation_history) > 0:
-            # Take last 10 messages (5 user + 5 assistant exchanges)
-            recent_history = conversation_history[-10:]
-            for msg in recent_history:
+        # Add previous conversation history (excluding current question)
+        if conversation_history:
+            # Get all messages except the last one (which is the current question)
+            for msg in conversation_history[:-1]:
                 messages.append({
                     "role": msg["role"],
                     "content": msg["content"]
                 })
         
-        # Add current question with document context
-        current_prompt = f"""Based on the following document excerpts and our conversation history, please answer the question.
+        # Create the context from chunks
+        context = "\n\n---\n\n".join(chunks)
+        
+        # Add current question with context
+        current_prompt = f"""Based on the following document excerpts, please answer the question. If the answer cannot be found in the excerpts, say so.
 
-Document Context:
+Document excerpts:
 {context}
 
 Question: {question}
 
-Please provide a comprehensive answer based on the document context. If referring to previous parts of our conversation, make those connections clear."""
+Please provide a detailed answer based on the document excerpts above."""
         
         messages.append({
             "role": "user",
             "content": current_prompt
         })
         
-        # Call Claude API
-        response = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
+        # Call Claude Opus 4 API with conversation history
+        message = self.client.messages.create(
+            model="claude-opus-4-20250514",  # ✅ CLAUDE OPUS 4
             max_tokens=max_tokens,
             messages=messages
         )
         
-        return response.content[0].text
+        return message.content[0].text
